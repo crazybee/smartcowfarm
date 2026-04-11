@@ -1,4 +1,2 @@
 <Solution>
-  <Project Path="SmartCowFarm.Functions/SmartCowFarm.Functions.csproj" />
-  <Project Path="SmartCowFarm.Tests/SmartCowFarm.Tests.csproj" />
 </Solution>
