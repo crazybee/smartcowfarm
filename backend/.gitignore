@@ -9,6 +9,7 @@ obj/
 
 ## Azure Functions local settings (may contain secrets)
 local.settings.json
+**/local.settings.json
 
 ## NuGet packages
 *.nupkg
