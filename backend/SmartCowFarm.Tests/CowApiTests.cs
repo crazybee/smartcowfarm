@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartCowFarm.Functions.Data;
 using SmartCowFarm.Functions.Functions;
 using SmartCowFarm.Functions.Models;
@@ -19,7 +20,7 @@ public class CowApiTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _db = new CowFarmDbContext(options);
-        _sut = new CowApi(_db);
+        _sut = new CowApi(_db, NullLogger<CowApi>.Instance);
     }
 
     public void Dispose() => _db.Dispose();

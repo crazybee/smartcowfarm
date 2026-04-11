@@ -3,12 +3,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using SmartCowFarm.Functions.Data;
 using SmartCowFarm.Functions.Models;
 
 namespace SmartCowFarm.Functions.Functions;
 
-public class CowApi(CowFarmDbContext db)
+public class CowApi(CowFarmDbContext db, ILogger<CowApi> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -92,8 +93,9 @@ public class CowApi(CowFarmDbContext db)
         {
             dto = await JsonSerializer.DeserializeAsync<CowDto>(req.Body, JsonOptions);
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogError(ex, "Failed to deserialize CreateCow request body");
             return new BadRequestObjectResult("Invalid JSON body");
         }
 
@@ -128,8 +130,9 @@ public class CowApi(CowFarmDbContext db)
         {
             dto = await JsonSerializer.DeserializeAsync<CowDto>(req.Body, JsonOptions);
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogError(ex, "Failed to deserialize UpdateCow request body for cow {Id}", id);
             return new BadRequestObjectResult("Invalid JSON body");
         }
 
@@ -200,8 +203,9 @@ public class CowApi(CowFarmDbContext db)
         {
             dto = await JsonSerializer.DeserializeAsync<VaccinationDto>(req.Body, JsonOptions);
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogError(ex, "Failed to deserialize AddVaccination request body for cow {CowId}", cowId);
             return new BadRequestObjectResult("Invalid JSON body");
         }
 

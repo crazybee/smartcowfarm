@@ -81,6 +81,8 @@ public class IoTHubProcessor(CowFarmDbContext db, NotificationService notificati
         }
         catch
         {
+            // Silently return empty coordinates; misconfigured GeofenceCoordinates env var
+            // will result in geofence checks being skipped rather than crashing the function.
             return ([], []);
         }
     }
