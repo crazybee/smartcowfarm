@@ -17,17 +17,17 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="cow in store.cows" :key="cow.id">
-            <td>{{ cow.id }}</td>
-            <td>{{ cow.gender === 'female' ? '♀️ Female' : '♂️ Male' }}</td>
+          <tr v-for="cow in store.cows" :key="getCowId(cow)">
+            <td>{{ getCowId(cow) }}</td>
+            <td>{{ genderLabel(cow.gender) }}</td>
             <td>{{ cow.birth_date ? new Date(cow.birth_date).toLocaleDateString() : 'N/A' }}</td>
-            <td :class="{ 'temp-high': (cow.body_temp || 0) > 39.5 }">
+            <td :class="{ 'temp-high': (cow.body_temp || 0) > 39.5, 'temp-low': cow.body_temp != null && cow.body_temp < 38.0 }">
               {{ cow.body_temp != null ? `${cow.body_temp}°C` : 'N/A' }}
             </td>
             <td>{{ cow.last_milking ? new Date(cow.last_milking).toLocaleString() : 'N/A' }}</td>
             <td>
               <button class="edit-btn" @click="openEditModal(cow)">Edit</button>
-              <button class="delete-btn" @click="confirmDelete(cow.id)">Delete</button>
+              <button class="delete-btn" @click="confirmDelete(getCowId(cow))">Delete</button>
             </td>
           </tr>
           <tr v-if="store.cows.length === 0">
@@ -49,6 +49,13 @@
           <label>Birth Date <input type="date" v-model="form.birth_date" /></label>
           <label>Body Temp (°C) <input type="number" step="0.1" v-model.number="form.body_temp" /></label>
           <label>Last Milking <input type="datetime-local" v-model="form.last_milking" /></label>
+          <div class="location-section">
+            <span class="location-label">Location</span>
+            <LocationPicker
+              :modelValue="{ lat: form.latitude, lng: form.longitude }"
+              @update:modelValue="v => { form.latitude = v.lat; form.longitude = v.lng }"
+            />
+          </div>
           <div class="modal-actions">
             <button type="submit" class="btn-primary">{{ editingCow ? 'Update' : 'Add' }}</button>
             <button type="button" @click="showModal = false">Cancel</button>
@@ -63,17 +70,23 @@
 import { ref, onMounted } from 'vue'
 import { useCowStore } from '../stores/cowStore'
 import apiService from '../services/apiService'
+import { getCowId } from '../services/modelTransforms'
+import LocationPicker from '../components/LocationPicker.vue'
 
 const store = useCowStore()
 const showModal = ref(false)
 const editingCow = ref(null)
-const form = ref({ gender: 'female', birth_date: '', body_temp: '', last_milking: '' })
+const form = ref({ gender: 'female', birth_date: '', body_temp: '', last_milking: '', latitude: 0, longitude: 0 })
 
 onMounted(() => { if (!store.cows.length) store.fetchCows() })
 
+function genderLabel(gender) {
+  return gender === 'female' ? '♀️ Female' : gender === 'male' ? '♂️ Male' : 'Unknown'
+}
+
 function openAddModal() {
   editingCow.value = null
-  form.value = { gender: 'female', birth_date: '', body_temp: '', last_milking: '' }
+  form.value = { gender: 'female', birth_date: '', body_temp: '', last_milking: '', latitude: 0, longitude: 0 }
   showModal.value = true
 }
 
@@ -84,6 +97,8 @@ function openEditModal(cow) {
     birth_date: cow.birth_date ? cow.birth_date.slice(0, 10) : '',
     body_temp: cow.body_temp ?? '',
     last_milking: cow.last_milking ? cow.last_milking.slice(0, 16) : '',
+    latitude: cow.latitude ?? 0,
+    longitude: cow.longitude ?? 0,
   }
   showModal.value = true
 }
@@ -91,8 +106,8 @@ function openEditModal(cow) {
 async function submitForm() {
   try {
     if (editingCow.value) {
-      await apiService.updateCow(editingCow.value.id, form.value)
-      await store.fetchCows()
+      await apiService.updateCow(getCowId(editingCow.value), form.value)
+      await Promise.all([store.fetchCows(), store.fetchAlerts()])
     } else {
       await store.addCow(form.value)
     }
@@ -120,15 +135,18 @@ h1 { margin: 0; }
 .table th { background: #f9fafb; font-weight: 600; }
 .table tr:hover { background: #f9fafb; }
 .temp-high { color: #ef4444; font-weight: 700; }
+.temp-low { color: #3b82f6; font-weight: 700; }
 .edit-btn { background: #f59e0b; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; margin-right: 6px; }
 .delete-btn { background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
 .empty { text-align: center; color: #9ca3af; padding: 24px; }
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal { background: white; border-radius: 10px; padding: 24px; min-width: 360px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; overflow-y: auto; padding: 20px; }
+.modal { background: white; border-radius: 10px; padding: 24px; width: 100%; max-width: 520px; max-height: calc(100vh - 40px); overflow-y: auto; }
 .modal h3 { margin: 0 0 16px; }
 .modal form { display: flex; flex-direction: column; gap: 12px; }
 .modal label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
 .modal input, .modal select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+.location-section { display: flex; flex-direction: column; gap: 4px; }
+.location-label { font-size: 0.9rem; font-weight: 500; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .btn-primary { background: #3b82f6; color: white; border: none; padding: 6px 16px; border-radius: 6px; cursor: pointer; }
 </style>

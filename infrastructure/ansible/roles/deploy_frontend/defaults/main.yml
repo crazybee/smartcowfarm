@@ -1,0 +1,4 @@
+---
+# roles/deploy_frontend/defaults/main.yml
+node_version:   "20"
+frontend_dir:   "{{ playbook_dir }}/../../../frontend"

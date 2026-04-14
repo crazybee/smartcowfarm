@@ -1,0 +1,281 @@
+# azure-pipelines/cd-app.yml
+# Application CD – builds & pushes the Docker image to ACR, deploys the
+# Functions container, deploys the Vue SPA to Static Web Apps, and runs
+# smoke tests using Ansible.
+#
+# Required variable groups (Library → Variable groups):
+#   "cowfarm-global":
+#     VM_IMAGE, NODE_VERSION, TERRAFORM_VERSION, TERRAFORM_WORKING_DIR
+#     ANSIBLE_DIR, BACKEND_DOCKERFILE, BACKEND_BUILD_CONTEXT
+#     FRONTEND_WORKING_DIR, DOCKER_REPOSITORY
+#   "cowfarm-<env>":
+#     AZURE_SERVICE_CONNECTION
+#     ACR_SERVICE_CONNECTION
+#     TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE_ACCOUNT, TFSTATE_CONTAINER, TFSTATE_KEY
+#   "cowfarm-secrets":
+#     ACR_ADMIN_USERNAME, ACR_ADMIN_PASSWORD
+#
+# Triggered on application changes. Terraform outputs are read from remote state
+# at runtime, so this pipeline does not need hardcoded app/resource variables.
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - infrastructure/terraform/**
+      - "*.md"
+
+pr: none
+
+pool:
+  vmImage: $(VM_IMAGE)
+
+parameters:
+  - name: environment
+    displayName: "Target environment"
+    type: string
+    default: dev
+    values: [dev, prod]
+
+variables:
+  - group: cowfarm-global
+  - group: cowfarm-${{ parameters.environment }}
+  - group: cowfarm-secrets
+  - name: ENV
+    value: ${{ parameters.environment }}
+  - name: IMAGE_TAG
+    value: $(Build.BuildId)
+
+stages:
+  - stage: Load_Terraform_Outputs
+    displayName: "Terraform – Load deployment outputs"
+    jobs:
+      - job: ReadTfOutputs
+        displayName: "Read remote state outputs"
+        steps:
+          - checkout: self
+
+          - bash: |
+              set -euo pipefail
+              curl -fsSL -o terraform.zip "https://releases.hashicorp.com/terraform/$(TERRAFORM_VERSION)/terraform_$(TERRAFORM_VERSION)_linux_amd64.zip"
+              unzip -o terraform.zip
+              sudo install terraform /usr/local/bin/terraform
+              terraform version
+            displayName: "Install Terraform $(TERRAFORM_VERSION)"
+
+          - task: AzureCLI@2
+            name: ExportOutputs
+            displayName: "Export Terraform outputs"
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                # Override any stale ARM_* vars from variable groups; bind Terraform to this service connection.
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                else
+                  export ARM_USE_OIDC="true"
+                  export ARM_OIDC_TOKEN="${idToken:-}"
+                fi
+                cd $(TERRAFORM_WORKING_DIR)
+
+                # Defensive cleanup in case local .terraform metadata was committed.
+                rm -rf .terraform
+
+                terraform init \
+                  -reconfigure \
+                  -backend-config="resource_group_name=$(TFSTATE_RESOURCE_GROUP)" \
+                  -backend-config="storage_account_name=$(TFSTATE_STORAGE_ACCOUNT)" \
+                  -backend-config="container_name=$(TFSTATE_CONTAINER)" \
+                  -backend-config="key=$(TFSTATE_KEY)" \
+                  -backend-config="use_azuread_auth=true"
+
+                tf_out() { terraform output -raw "$1"; }
+
+                echo "##vso[task.setvariable variable=TF_OUT_RESOURCE_GROUP_NAME;isOutput=true]$(tf_out resource_group_name)"
+                echo "##vso[task.setvariable variable=TF_OUT_ACR_LOGIN_SERVER;isOutput=true]$(tf_out acr_login_server)"
+                echo "##vso[task.setvariable variable=TF_OUT_ACR_NAME;isOutput=true]$(tf_out acr_name)"
+                echo "##vso[task.setvariable variable=TF_OUT_FUNCTIONS_APP_NAME;isOutput=true]$(tf_out functions_app_name)"
+                echo "##vso[task.setvariable variable=TF_OUT_FUNCTIONS_HOSTNAME;isOutput=true]$(tf_out functions_hostname)"
+                echo "##vso[task.setvariable variable=TF_OUT_STATIC_WEB_APP_NAME;isOutput=true]$(tf_out static_web_app_name)"
+                echo "##vso[task.setvariable variable=TF_OUT_STATIC_WEB_APP_URL;isOutput=true]$(tf_out static_web_app_url)"
+                echo "##vso[task.setvariable variable=TF_OUT_STATIC_WEB_APP_API_KEY;isOutput=true]$(tf_out static_web_app_api_key)"
+
+  # ─── Build & push container image ───────────────────────────────────────────
+  - stage: Build_Push
+    displayName: "Docker – Build & Push to ACR"
+    dependsOn: Load_Terraform_Outputs
+    variables:
+      TF_OUT_ACR_LOGIN_SERVER: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_ACR_LOGIN_SERVER'] ]
+    jobs:
+      - job: DockerBuildPush
+        displayName: "Build Functions image → ACR"
+        steps:
+          - checkout: self
+
+          - task: Docker@2
+            displayName: "ACR login"
+            inputs:
+              command: login
+              containerRegistry: $(ACR_SERVICE_CONNECTION)
+
+          - task: Docker@2
+            displayName: "Build smartcowfarm-functions:$(IMAGE_TAG)"
+            inputs:
+              command: build
+              Dockerfile: $(BACKEND_DOCKERFILE)
+              buildContext: $(BACKEND_BUILD_CONTEXT)
+              repository: $(DOCKER_REPOSITORY)
+              tags: |
+                $(IMAGE_TAG)
+                latest
+              arguments: "--platform linux/amd64"
+
+          - task: Docker@2
+            displayName: "Push smartcowfarm-functions:$(IMAGE_TAG)"
+            inputs:
+              command: push
+              repository: $(DOCKER_REPOSITORY)
+              tags: |
+                $(IMAGE_TAG)
+                latest
+
+  # ─── Deploy backend ──────────────────────────────────────────────────────────
+  - stage: Deploy_Backend
+    displayName: "Ansible – Deploy Functions container"
+    dependsOn:
+      - Load_Terraform_Outputs
+      - Build_Push
+    condition: succeeded()
+    variables:
+      TF_OUT_RESOURCE_GROUP_NAME: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_RESOURCE_GROUP_NAME'] ]
+      TF_OUT_ACR_LOGIN_SERVER: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_ACR_LOGIN_SERVER'] ]
+      TF_OUT_FUNCTIONS_APP_NAME: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_FUNCTIONS_APP_NAME'] ]
+      TF_OUT_FUNCTIONS_HOSTNAME: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_FUNCTIONS_HOSTNAME'] ]
+    jobs:
+      - deployment: DeployFunctions
+        displayName: "Update Functions app container"
+        environment: "cowfarm-$(ENV)"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - script: |
+                    pip install ansible
+                    ansible-galaxy collection install -r infrastructure/ansible/requirements.yml
+                  displayName: "Install Ansible + collections"
+
+                - task: AzureCLI@2
+                  displayName: "ansible-playbook: deploy backend"
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      cd $(ANSIBLE_DIR)
+                      ansible-playbook \
+                        -i inventory/$(ENV).yml \
+                        playbooks/01-deploy-backend.yml \
+                        -e image_tag=$(IMAGE_TAG) \
+                        -e acr_login_server="$(TF_OUT_ACR_LOGIN_SERVER)" \
+                        -e acr_admin_username=$(ACR_ADMIN_USERNAME) \
+                        -e acr_admin_password=$(ACR_ADMIN_PASSWORD) \
+                        -e functions_app_name="$(TF_OUT_FUNCTIONS_APP_NAME)" \
+                        -e azure_resource_group="$(TF_OUT_RESOURCE_GROUP_NAME)" \
+                        -v
+
+  # ─── Deploy frontend ─────────────────────────────────────────────────────────
+  - stage: Deploy_Frontend
+    displayName: "Ansible – Deploy Vue SPA to Static Web Apps"
+    dependsOn:
+      - Load_Terraform_Outputs
+      - Build_Push
+    condition: succeeded()
+    variables:
+      TF_OUT_FUNCTIONS_HOSTNAME: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_FUNCTIONS_HOSTNAME'] ]
+      TF_OUT_STATIC_WEB_APP_NAME: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_STATIC_WEB_APP_NAME'] ]
+    jobs:
+      - deployment: DeployFrontend
+        displayName: "Build + deploy frontend"
+        environment: "cowfarm-$(ENV)"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  inputs:
+                    versionSpec: $(NODE_VERSION)
+
+                - script: |
+                    pip install ansible
+                    ansible-galaxy collection install -r infrastructure/ansible/requirements.yml
+                  displayName: "Install Ansible + collections"
+
+                - task: AzureCLI@2
+                  displayName: "ansible-playbook: deploy frontend"
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      # Fetch SWA deployment token live – secret output vars cannot cross stage boundaries.
+                      SWA_API_KEY=$(az staticwebapp secrets list \
+                        --name "$(TF_OUT_STATIC_WEB_APP_NAME)" \
+                        --query "properties.apiKey" -o tsv)
+                      cd $(ANSIBLE_DIR)
+                      ansible-playbook \
+                        -i inventory/$(ENV).yml \
+                        playbooks/02-deploy-frontend.yml \
+                        -e "static_web_app_api_key=${SWA_API_KEY}" \
+                        -e "frontend_dir=$(Build.SourcesDirectory)/frontend" \
+                        -v
+                  env:
+                    TF_OUT_FUNCTIONS_HOSTNAME:  $(TF_OUT_FUNCTIONS_HOSTNAME)
+                    TF_OUT_STATIC_WEB_APP_NAME: $(TF_OUT_STATIC_WEB_APP_NAME)
+
+  # ─── Smoke tests ─────────────────────────────────────────────────────────────
+  - stage: Smoke_Tests
+    displayName: "Ansible – Smoke tests"
+    dependsOn:
+      - Load_Terraform_Outputs
+      - Deploy_Backend
+      - Deploy_Frontend
+    condition: succeeded()
+    variables:
+      TF_OUT_FUNCTIONS_HOSTNAME: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_FUNCTIONS_HOSTNAME'] ]
+      TF_OUT_STATIC_WEB_APP_URL: $[ stageDependencies.Load_Terraform_Outputs.ReadTfOutputs.outputs['ExportOutputs.TF_OUT_STATIC_WEB_APP_URL'] ]
+    jobs:
+      - job: SmokeTest
+        displayName: "HTTP smoke tests"
+        steps:
+          - checkout: self
+
+          - script: pip install ansible
+            displayName: "Install Ansible"
+
+          - script: |
+              cd $(ANSIBLE_DIR)
+              ansible-playbook \
+                -i inventory/$(ENV).yml \
+                playbooks/03-smoke-test.yml \
+                -v
+            displayName: "ansible-playbook: smoke tests"
+            env:
+              TF_OUT_FUNCTIONS_HOSTNAME:  $(TF_OUT_FUNCTIONS_HOSTNAME)
+              TF_OUT_STATIC_WEB_APP_URL:  $(TF_OUT_STATIC_WEB_APP_URL)

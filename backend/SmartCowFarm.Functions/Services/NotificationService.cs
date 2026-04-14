@@ -15,7 +15,18 @@ public class NotificationService
             {
                 CowId = cow.CowId,
                 AlertType = AlertType.HighTemperature,
-                Message = $"Cow {cow.CowId} has high body temperature: {cow.BodyTemp:F1}°C (threshold: 39.5°C)",
+                Message = $"Cow {cow.CowId} has high body temperature: {cow.BodyTemp:F1}°C (normal range: 38.0–39.5°C)",
+                IsResolved = false,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+        }
+        else if (cow.BodyTemp < 38.0)
+        {
+            yield return new Alert
+            {
+                CowId = cow.CowId,
+                AlertType = AlertType.LowTemperature,
+                Message = $"Cow {cow.CowId} has low body temperature: {cow.BodyTemp:F1}°C (normal range: 38.0–39.5°C)",
                 IsResolved = false,
                 CreatedAt = DateTimeOffset.UtcNow
             };

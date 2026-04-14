@@ -1,0 +1,4 @@
+---
+# group_vars/prod.yml – production-specific overrides.
+# image_tag is injected by the CD pipeline as an extra-var.
+functions_api_base_url: "https://{{ lookup('env', 'TF_OUT_FUNCTIONS_HOSTNAME') }}/api"

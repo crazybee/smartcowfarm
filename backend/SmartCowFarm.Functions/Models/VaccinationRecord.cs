@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace SmartCowFarm.Functions.Models;
 
@@ -19,5 +20,6 @@ public class VaccinationRecord
 
     public DateOnly? NextDueDate { get; set; }
 
+    [JsonIgnore]
     public Cow Cow { get; set; } = null!;
 }

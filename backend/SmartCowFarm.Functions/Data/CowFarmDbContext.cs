@@ -15,7 +15,7 @@ public class CowFarmDbContext(DbContextOptions<CowFarmDbContext> options) : DbCo
 
         modelBuilder.Entity<Cow>(entity =>
         {
-            entity.ToTable("Cow");
+            entity.ToTable("Cows");
             entity.HasKey(e => e.CowId);
             entity.Property(e => e.Gender).HasConversion<string>();
             entity.HasIndex(e => e.NextVaxDue);
@@ -27,14 +27,14 @@ public class CowFarmDbContext(DbContextOptions<CowFarmDbContext> options) : DbCo
 
         modelBuilder.Entity<VaccinationRecord>(entity =>
         {
-            entity.ToTable("VaccinationRecord");
+            entity.ToTable("VaccinationRecords");
             entity.HasKey(e => e.RecordId);
             entity.HasIndex(e => e.CowId);
         });
 
         modelBuilder.Entity<Alert>(entity =>
         {
-            entity.ToTable("Alert");
+            entity.ToTable("Alerts");
             entity.HasKey(e => e.AlertId);
             entity.Property(e => e.AlertType).HasConversion<string>();
             entity.HasIndex(e => new { e.CowId, e.IsResolved });

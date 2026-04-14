@@ -1,0 +1,10 @@
+# Terraform local working directory and state artifacts
+infrastructure/terraform/.terraform/
+infrastructure/terraform/.terraform.lock.hcl
+infrastructure/terraform/*.tfstate
+infrastructure/terraform/*.tfstate.*
+infrastructure/terraform/crash.log
+
+# Optional local variable override files
+infrastructure/terraform/*.auto.tfvars
+infrastructure/terraform/*.auto.tfvars.json

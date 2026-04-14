@@ -1,0 +1,4 @@
+---
+# roles/build_push_image/defaults/main.yml
+build_platform: "linux/amd64"
+push_retries: 3

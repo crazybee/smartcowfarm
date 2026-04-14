@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -7,11 +8,11 @@ namespace SmartCowFarm.Functions.Functions;
 public class SignalRFunctions
 {
     [Function("negotiate")]
-    public static SignalRConnectionInfo Negotiate(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "negotiate")] HttpRequest req,
+    public static IActionResult Negotiate(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "negotiate")] HttpRequest req,
         [SignalRConnectionInfoInput(HubName = "cowfarm")] SignalRConnectionInfo connectionInfo)
     {
-        return connectionInfo;
+        return new OkObjectResult(connectionInfo);
     }
 
     [Function("broadcastUpdate")]

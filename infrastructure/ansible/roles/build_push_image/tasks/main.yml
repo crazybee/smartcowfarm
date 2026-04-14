@@ -1,0 +1,45 @@
+---
+# roles/build_push_image/tasks/main.yml
+# Builds the Functions Docker image and pushes it to Azure Container Registry.
+
+- name: Log in to Azure Container Registry
+  community.docker.docker_login:
+    registry_url: "{{ acr_login_server }}"
+    username: "{{ acr_admin_username }}"
+    password: "{{ acr_admin_password }}"
+  no_log: true
+
+- name: Build backend Docker image
+  community.docker.docker_image:
+    name: "{{ acr_login_server }}/{{ backend_image_name }}"
+    tag: "{{ image_tag }}"
+    source: build
+    build:
+      path: "{{ backend_dir }}"
+      dockerfile: "{{ backend_dockerfile }}"
+      platform: "{{ build_platform }}"
+      pull: true
+    state: present
+    force_source: true
+
+- name: Tag image as 'latest' (for rollback reference)
+  community.docker.docker_image:
+    name: "{{ acr_login_server }}/{{ backend_image_name }}"
+    repository: "{{ acr_login_server }}/{{ backend_image_name }}"
+    tag: latest
+    source: local
+    state: present
+  when: image_tag != "latest"
+
+- name: Push versioned tag to ACR
+  community.docker.docker_image:
+    name: "{{ acr_login_server }}/{{ backend_image_name }}:{{ image_tag }}"
+    push: true
+    source: local
+
+- name: Push latest tag to ACR
+  community.docker.docker_image:
+    name: "{{ acr_login_server }}/{{ backend_image_name }}:latest"
+    push: true
+    source: local
+  when: image_tag != "latest"

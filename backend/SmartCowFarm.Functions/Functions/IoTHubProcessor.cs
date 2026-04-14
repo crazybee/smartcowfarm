@@ -1,14 +1,12 @@
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using SmartCowFarm.Functions.Data;
 using SmartCowFarm.Functions.Models;
 using SmartCowFarm.Functions.Services;
 
 namespace SmartCowFarm.Functions.Functions;
 
-public class IoTHubProcessor(CowFarmDbContext db, NotificationService notificationService, ILogger<IoTHubProcessor> logger)
+public class IoTHubProcessor(ICowService cowService, IAlertService alertService, NotificationService notificationService, ILogger<IoTHubProcessor> logger)
 {
     [Function("ProcessTelemetry")]
     [SignalROutput(HubName = "cowfarm")]
@@ -32,17 +30,12 @@ public class IoTHubProcessor(CowFarmDbContext db, NotificationService notificati
             return null;
         }
 
-        var cow = await db.Cows.FirstOrDefaultAsync(c => c.CowId == cowId);
+        var cow = await cowService.UpdateCowTelemetryAsync(cowId, payload.Temperature, payload.Latitude, payload.Longitude);
         if (cow is null)
         {
             logger.LogWarning("Cow not found for DeviceId: {DeviceId}", payload.DeviceId);
             return null;
         }
-
-        cow.BodyTemp = payload.Temperature;
-        cow.Latitude = payload.Latitude;
-        cow.Longitude = payload.Longitude;
-        cow.UpdatedAt = DateTimeOffset.UtcNow;
 
         var geofenceCoords = ParseGeofenceCoordinates();
         var alerts = new List<Alert>();
@@ -51,9 +44,7 @@ public class IoTHubProcessor(CowFarmDbContext db, NotificationService notificati
             alerts.AddRange(notificationService.CheckGeofenceAlert(cow, geofenceCoords.Latitudes, geofenceCoords.Longitudes));
 
         if (alerts.Count > 0)
-            db.Alerts.AddRange(alerts);
-
-        await db.SaveChangesAsync();
+            await alertService.AddAlertsAsync(alerts);
 
         if (alerts.Count > 0)
         {

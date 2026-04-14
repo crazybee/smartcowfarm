@@ -1,0 +1,10 @@
+---
+# inventory/dev.yml  – static localhost inventory for dev deployments.
+# All Azure operations run locally against the target Azure subscription.
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+      ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    env: dev

@@ -1,0 +1,62 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: smartcowfarm-sql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Your_password123"
+    ports:
+      - "14333:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Your_password123 -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: smartcowfarm-azurite
+    command: "azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0"
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+
+  functions:
+    build:
+      context: ./backend/SmartCowFarm.Functions
+      dockerfile: Dockerfile
+    container_name: smartcowfarm-functions
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+    ports:
+      - "7071:7071"
+    environment:
+      AzureWebJobsStorage: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;"
+      SqlConnectionString: "Server=sqlserver,1433;Database=SmartCowFarmDb;User Id=sa;Password=Your_password123;TrustServerCertificate=True;"
+      AutoCreateDatabase: "true"
+      GeofenceCoordinates: "[[0,0],[0,1],[1,1],[1,0],[0,0]]"
+      IoTHubConnectionString: "Endpoint=sb://local/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=fake;EntityPath=telemetry"
+      AzureSignalRConnectionString: "Endpoint=https://local.service.signalr.net;AccessKey=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=;Version=1.0;"
+      AzureWebJobs.ProcessTelemetry.Disabled: "true"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smartcowfarm-frontend
+    depends_on:
+      functions:
+        condition: service_started
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_PROXY_TARGET: "http://functions:7071"
+      VITE_SIGNALR_ENABLED: "false"
+      CHOKIDAR_USEPOLLING: "true"

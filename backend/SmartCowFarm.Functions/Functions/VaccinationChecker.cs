@@ -1,38 +1,39 @@
 using Microsoft.Azure.Functions.Worker;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using SmartCowFarm.Functions.Data;
 using SmartCowFarm.Functions.Models;
 using SmartCowFarm.Functions.Services;
 
 namespace SmartCowFarm.Functions.Functions;
 
-public class VaccinationChecker(CowFarmDbContext db, NotificationService notificationService, ILogger<VaccinationChecker> logger)
+public class VaccinationChecker(ICowService cowService, IAlertService alertService, NotificationService notificationService, ILogger<VaccinationChecker> logger)
 {
     [Function("CheckVaccinationsDue")]
     [SignalROutput(HubName = "cowfarm")]
-    public async Task<SignalRMessageAction?> Run([TimerTrigger("0 0 0 * * *")] TimerInfo timer)
+    public async Task<SignalRMessageAction?> Run([TimerTrigger("0 0 0 * * *", RunOnStartup = true)] TimerInfo timer)
     {
-        logger.LogInformation("Vaccination check triggered at: {Time}", DateTimeOffset.UtcNow);
+        logger.LogInformation("Scheduled alert check triggered at: {Time}", DateTimeOffset.UtcNow);
 
-        var cutoff = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3));
-        var cows = await db.Cows
-            .Where(c => c.NextVaxDue != null && c.NextVaxDue <= cutoff)
-            .ToListAsync();
+        var allAlerts = new List<Alert>();
 
-        var alerts = cows
-            .SelectMany(cow => notificationService.CheckVaccinationDue(cow))
-            .ToList();
+        // ─ Vaccination due alerts ──────────────────────────────────────────────────────────────
+        var vaccinationAlerts = await cowService.GetVaccinationDueAlertsAsync();
+        allAlerts.AddRange(vaccinationAlerts);
+        if (vaccinationAlerts.Any())
+            logger.LogInformation("Created {Count} vaccination due alerts", vaccinationAlerts.Count());
 
-        if (alerts.Count > 0)
+        // ─ Temperature backfill (cows with no open alert but abnormal temp) ───────────────────
+        var uncoveredCows = await cowService.GetCowsMissingTemperatureAlertsAsync();
+        var tempAlerts = uncoveredCows.SelectMany(c => notificationService.CheckTemperatureAlert(c)).ToList();
+        allAlerts.AddRange(tempAlerts);
+        if (tempAlerts.Count > 0)
+            logger.LogInformation("Backfilled {Count} temperature alerts", tempAlerts.Count);
+
+        if (allAlerts.Count > 0)
         {
-            db.Alerts.AddRange(alerts);
-            await db.SaveChangesAsync();
-            logger.LogInformation("Created {Count} vaccination due alerts", alerts.Count);
-
+            await alertService.AddAlertsAsync(allAlerts);
             return new SignalRMessageAction("cowAlerts")
             {
-                Arguments = [alerts]
+                Arguments = [allAlerts]
             };
         }
 

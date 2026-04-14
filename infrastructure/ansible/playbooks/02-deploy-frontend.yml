@@ -1,0 +1,23 @@
+---
+# 02-deploy-frontend.yml
+# Builds the Vue 3/Vite SPA and deploys static assets to Azure Static Web Apps.
+#
+# Required environment variables:
+#   TF_OUT_FUNCTIONS_HOSTNAME   – used to write VITE_API_BASE_URL at build time
+#   TF_OUT_STATIC_WEB_APP_API_KEY – SWA deployment token
+
+- name: Build and deploy Vue 3 frontend
+  hosts: localhost
+  gather_facts: false
+
+  pre_tasks:
+    - name: Assert required variables are set
+      ansible.builtin.assert:
+        that:
+          - static_web_app_api_key is defined and static_web_app_api_key != ""
+          - lookup('env', 'TF_OUT_FUNCTIONS_HOSTNAME') != ""
+        fail_msg: >
+          TF_OUT_FUNCTIONS_HOSTNAME and TF_OUT_STATIC_WEB_APP_API_KEY must be set.
+
+  roles:
+    - role: deploy_frontend

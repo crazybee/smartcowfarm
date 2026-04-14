@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace SmartCowFarm.Functions.Models;
 
@@ -33,5 +34,6 @@ public class Cow
     [NotMapped]
     public int Age => (int)((DateTimeOffset.UtcNow - BirthDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).TotalDays / 365.25);
 
+    [JsonIgnore]
     public ICollection<VaccinationRecord> VaccinationRecords { get; set; } = [];
 }

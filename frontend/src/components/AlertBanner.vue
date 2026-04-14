@@ -27,11 +27,20 @@ const unresolvedAlerts = computed(() =>
 const hasAlerts = computed(() => unresolvedAlerts.value.length > 0)
 
 const criticalAlerts = computed(() =>
-  unresolvedAlerts.value.filter(a => a.type === 'temperature')
+  unresolvedAlerts.value.filter(a =>
+    a.type === 'highTemperature' || a.type === 'lowTemperature' || a.type === 'temperature'
+  )
 )
 
 function alertIcon(type) {
-  const icons = { temperature: '🌡️', geofence: '📍', vaccination: '💉' }
+  const icons = {
+    highTemperature: '🌡️',
+    lowTemperature: '🥶',
+    temperature: '🌡️', // legacy
+    geofence: '📍',
+    vaccination: '💉',
+    unknown: '⚠️',
+  }
   return icons[type] || '⚠️'
 }
 </script>

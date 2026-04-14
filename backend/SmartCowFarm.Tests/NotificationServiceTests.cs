@@ -19,7 +19,7 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public void CheckTemperatureAlert_ExactlyAtThreshold_ReturnsNoAlert()
+    public void CheckTemperatureAlert_ExactlyAtUpperThreshold_ReturnsNoAlert()
     {
         var cow = CreateCow(bodyTemp: 39.5);
         var alerts = _sut.CheckTemperatureAlert(cow).ToList();
@@ -27,7 +27,15 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public void CheckTemperatureAlert_HighTemp_ReturnsAlert()
+    public void CheckTemperatureAlert_ExactlyAtLowerThreshold_ReturnsNoAlert()
+    {
+        var cow = CreateCow(bodyTemp: 38.0);
+        var alerts = _sut.CheckTemperatureAlert(cow).ToList();
+        Assert.Empty(alerts);
+    }
+
+    [Fact]
+    public void CheckTemperatureAlert_HighTemp_ReturnsHighTemperatureAlert()
     {
         var cow = CreateCow(bodyTemp: 40.2);
         var alerts = _sut.CheckTemperatureAlert(cow).ToList();
@@ -35,6 +43,28 @@ public class NotificationServiceTests
         Assert.Equal(AlertType.HighTemperature, alerts[0].AlertType);
         Assert.Equal(cow.CowId, alerts[0].CowId);
         Assert.Contains("40.2", alerts[0].Message);
+        Assert.Contains("high", alerts[0].Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CheckTemperatureAlert_LowTemp_ReturnsLowTemperatureAlert()
+    {
+        var cow = CreateCow(bodyTemp: 37.2);
+        var alerts = _sut.CheckTemperatureAlert(cow).ToList();
+        Assert.Single(alerts);
+        Assert.Equal(AlertType.LowTemperature, alerts[0].AlertType);
+        Assert.Equal(cow.CowId, alerts[0].CowId);
+        Assert.Contains("37.2", alerts[0].Message);
+        Assert.Contains("low", alerts[0].Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CheckTemperatureAlert_JustBelowLowerThreshold_ReturnsAlert()
+    {
+        var cow = CreateCow(bodyTemp: 37.9);
+        var alerts = _sut.CheckTemperatureAlert(cow).ToList();
+        Assert.Single(alerts);
+        Assert.Equal(AlertType.LowTemperature, alerts[0].AlertType);
     }
 
     // ─── Geofence Alerts ──────────────────────────────────────────────────────

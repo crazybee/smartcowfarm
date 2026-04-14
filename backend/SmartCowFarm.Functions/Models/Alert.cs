@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace SmartCowFarm.Functions.Models;
 
-public enum AlertType { HighTemperature, GeofenceBreach, VaccinationDue }
+public enum AlertType { HighTemperature, GeofenceBreach, VaccinationDue, LowTemperature }
 
 public class Alert
 {

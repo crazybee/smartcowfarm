@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import apiService from '../services/apiService'
+import { getCowId } from '../services/modelTransforms'
 
 export const useCowStore = defineStore('cow', () => {
   const cows = ref([])
@@ -28,9 +29,12 @@ export const useCowStore = defineStore('cow', () => {
   }
 
   function updateCowTelemetry(payload) {
-    const cow = cows.value.find(c => c.id === payload.id)
+    const payloadId = getCowId(payload)
+    const cow = cows.value.find(c => getCowId(c) === payloadId)
     if (cow) {
       if (payload.body_temp !== undefined) cow.body_temp = payload.body_temp
+      if (payload.latitude !== undefined) cow.latitude = payload.latitude
+      if (payload.longitude !== undefined) cow.longitude = payload.longitude
       if (payload.location !== undefined) cow.location = payload.location
       lastUpdated.value = new Date()
     }
@@ -50,6 +54,7 @@ export const useCowStore = defineStore('cow', () => {
     try {
       const created = await apiService.createCow(cowData)
       cows.value.push(created)
+      await fetchAlerts()
     } catch (e) {
       console.error('addCow error', e)
     }
@@ -58,7 +63,7 @@ export const useCowStore = defineStore('cow', () => {
   async function deleteCow(cowId) {
     try {
       await apiService.deleteCow(cowId)
-      cows.value = cows.value.filter(c => c.id !== cowId)
+      cows.value = cows.value.filter(c => getCowId(c) !== cowId)
     } catch (e) {
       console.error('deleteCow error', e)
     }
@@ -68,7 +73,7 @@ export const useCowStore = defineStore('cow', () => {
     const alertCowIds = new Set(
       alerts.value.filter(a => !a.resolved).map(a => a.cow_id)
     )
-    return cows.value.filter(c => alertCowIds.has(c.id))
+    return cows.value.filter(c => alertCowIds.has(getCowId(c)))
   })
 
   const alertsByType = computed(() => {

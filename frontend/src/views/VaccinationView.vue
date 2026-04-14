@@ -59,6 +59,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useCowStore } from '../stores/cowStore'
 import apiService from '../services/apiService'
+import { getCowId } from '../services/modelTransforms'
 
 const store = useCowStore()
 const records = ref([])
@@ -77,7 +78,7 @@ onMounted(async () => {
 async function loadAll() {
   try {
     const all = await Promise.all(
-      store.cows.map(c => apiService.getVaccinations(c.id).catch(() => []))
+      store.cows.map(c => apiService.getVaccinations(getCowId(c)).catch(() => []))
     )
     records.value = all.flat()
   } catch (e) {

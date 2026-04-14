@@ -1,0 +1,6 @@
+---
+# roles/deploy_functions/defaults/main.yml
+restart_wait_seconds: 60
+backend_image_name:   smartcowfarm-functions
+smoke_test_retries:   10
+smoke_test_delay:     15

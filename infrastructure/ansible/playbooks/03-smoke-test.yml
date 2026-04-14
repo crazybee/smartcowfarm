@@ -1,0 +1,56 @@
+---
+# 03-smoke-test.yml
+# Runs basic HTTP smoke tests against the deployed environment to verify
+# the Functions API and Static Web App are reachable.
+
+- name: Smoke test deployed environment
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    functions_base:     "https://{{ lookup('env', 'TF_OUT_FUNCTIONS_HOSTNAME') }}/api"
+    frontend_url:       "{{ lookup('env', 'TF_OUT_STATIC_WEB_APP_URL') }}"
+    smoke_test_retries: 10
+    smoke_test_delay:   15
+
+  tasks:
+    - name: GET /api/cows – expect 200
+      ansible.builtin.uri:
+        url: "{{ functions_base }}/cows"
+        method: GET
+        status_code: 200
+        validate_certs: true
+      register: cows_result
+      retries: "{{ smoke_test_retries }}"
+      delay: "{{ smoke_test_delay }}"
+      until: cows_result.status == 200
+
+    - name: GET /api/alerts – expect 200
+      ansible.builtin.uri:
+        url: "{{ functions_base }}/alerts"
+        method: GET
+        status_code: 200
+        validate_certs: true
+      register: alerts_result
+      retries: "{{ smoke_test_retries }}"
+      delay: "{{ smoke_test_delay }}"
+      until: alerts_result.status == 200
+
+    - name: GET Static Web App root – expect 200
+      ansible.builtin.uri:
+        url: "{{ frontend_url }}"
+        method: GET
+        status_code: 200
+        validate_certs: true
+      register: frontend_result
+      retries: "{{ smoke_test_retries }}"
+      delay: "{{ smoke_test_delay }}"
+      until: frontend_result.status == 200
+      when: frontend_url != ""
+
+    - name: Print smoke test summary
+      ansible.builtin.debug:
+        msg: |
+          ✅ Smoke tests passed
+             Functions API : {{ functions_base }}  (HTTP {{ cows_result.status }})
+             Frontend      : {{ frontend_url }}     (HTTP {{ frontend_result.status | default('skipped') }})

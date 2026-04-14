@@ -1,0 +1,37 @@
+---
+# roles/deploy_frontend/tasks/main.yml
+# Builds the Vue 3/Vite SPA and deploys it to Azure Static Web Apps.
+
+- name: Install frontend npm dependencies
+  ansible.builtin.command: npm ci
+  args:
+    chdir: "{{ frontend_dir }}"
+  changed_when: true
+
+- name: Write runtime .env for production build
+  ansible.builtin.copy:
+    dest: "{{ frontend_dir }}/.env.production.local"
+    mode: "0600"
+    content: |
+      VITE_API_BASE_URL=https://{{ lookup('env', 'TF_OUT_FUNCTIONS_HOSTNAME') }}/api
+      VITE_SIGNALR_HUB_URL=https://{{ lookup('env', 'TF_OUT_FUNCTIONS_HOSTNAME') }}/api
+      VITE_SIGNALR_ENABLED=true
+
+- name: Build Vue 3 frontend
+  ansible.builtin.command: npm run build
+  args:
+    chdir: "{{ frontend_dir }}"
+  environment:
+    NODE_ENV: production
+  changed_when: true
+
+- name: Deploy to Azure Static Web App via SWA CLI
+  ansible.builtin.command: >
+    npx @azure/static-web-apps-cli deploy
+      ./dist
+      --deployment-token {{ static_web_app_api_key }}
+      --env production
+  args:
+    chdir: "{{ frontend_dir }}"
+  no_log: true
+  changed_when: true

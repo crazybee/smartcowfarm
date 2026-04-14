@@ -1,0 +1,29 @@
+---
+# group_vars/all.yml  – variables shared across ALL environments.
+# Sensitive values (passwords, keys) must come from CI secret variables
+# or Azure Key Vault lookups – never hardcoded here.
+
+project_name: cowfarm
+
+# ── Paths relative to the repo root ──────────────────────────────────────────
+repo_root:        "{{ playbook_dir }}/../../.."
+backend_dir:      "{{ repo_root }}/backend"
+frontend_dir:     "{{ repo_root }}/frontend"
+backend_dockerfile: "{{ backend_dir }}/SmartCowFarm.Functions/Dockerfile"
+
+# ── Docker image ──────────────────────────────────────────────────────────────
+backend_image_name: "smartcowfarm-functions"
+# image_tag is overridden per environment or passed as an extra-var (-e image_tag=<buildId>)
+image_tag: "latest"
+
+# ── Azure – resolved from Terraform outputs (set as env vars by the pipeline) ─
+azure_subscription_id:   "{{ lookup('env', 'AZURE_SUBSCRIPTION_ID') }}"
+azure_resource_group:    "{{ lookup('env', 'TF_OUT_RESOURCE_GROUP_NAME') }}"
+acr_login_server:        "{{ lookup('env', 'TF_OUT_ACR_LOGIN_SERVER') }}"
+functions_app_name:      "{{ lookup('env', 'TF_OUT_FUNCTIONS_APP_NAME') }}"
+static_web_app_name:     "{{ lookup('env', 'TF_OUT_STATIC_WEB_APP_NAME') }}"
+static_web_app_api_key:  "{{ lookup('env', 'TF_OUT_STATIC_WEB_APP_API_KEY') }}"
+
+# ── Health check ──────────────────────────────────────────────────────────────
+smoke_test_retries: 10
+smoke_test_delay:   15

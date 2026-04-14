@@ -1,0 +1,4 @@
+---
+# group_vars/dev.yml – dev-specific overrides.
+image_tag: "latest"
+functions_api_base_url: "https://{{ lookup('env', 'TF_OUT_FUNCTIONS_HOSTNAME') }}/api"

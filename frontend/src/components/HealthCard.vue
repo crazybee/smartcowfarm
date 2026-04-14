@@ -12,7 +12,7 @@
       </div>
       <div class="stat">
         <span class="label">Temp</span>
-        <span class="value" :class="{ 'temp-high': isTempHigh }">
+        <span class="value" :class="{ 'temp-high': isTempHigh, 'temp-low': isTempLow }">
           {{ cow.body_temp != null ? `${cow.body_temp}°C` : 'N/A' }}
         </span>
       </div>
@@ -31,6 +31,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useCowStore } from '../stores/cowStore'
+import { getCowId } from '../services/modelTransforms'
 
 const props = defineProps({
   cow: { type: Object, required: true },
@@ -39,14 +40,15 @@ const props = defineProps({
 const store = useCowStore()
 
 const shortId = computed(() => {
-  const id = String(props.cow.id || '')
+  const id = String(getCowId(props.cow) || '')
   return id.length > 8 ? id.slice(0, 8) + '…' : id
 })
 
 const isTempHigh = computed(() => (props.cow.body_temp || 0) > 39.5)
+const isTempLow = computed(() => props.cow.body_temp != null && props.cow.body_temp < 38.0)
 
 const hasAlert = computed(() =>
-  store.alerts.some(a => !a.resolved && a.cow_id === props.cow.id)
+  store.alerts.some(a => !a.resolved && a.cow_id === getCowId(props.cow))
 )
 
 const age = computed(() => {
@@ -87,4 +89,5 @@ const lastMilkingStr = computed(() => {
 .label { color: #6b7280; }
 .value { font-weight: 500; }
 .temp-high { color: #ef4444; font-weight: 700; }
+.temp-low { color: #3b82f6; font-weight: 700; }
 </style>

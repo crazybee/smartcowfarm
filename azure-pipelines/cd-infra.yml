@@ -1,0 +1,228 @@
+# azure-pipelines/cd-infra.yml
+# Infrastructure CD – runs Terraform to provision / update Azure resources.
+# Must be triggered BEFORE cd-app.yml on a fresh environment.
+#
+# Required pipeline variable groups (Library → Variable groups):
+#   "cowfarm-global" containing:
+#     VM_IMAGE, TERRAFORM_VERSION, TERRAFORM_WORKING_DIR
+#   "cowfarm-<env>" containing:
+#     AZURE_SERVICE_CONNECTION
+#     TFSTATE_RESOURCE_GROUP, TFSTATE_STORAGE_ACCOUNT, TFSTATE_CONTAINER, TFSTATE_KEY
+#   "cowfarm-secrets" containing:
+#     TF_VAR_sql_admin_login, TF_VAR_sql_admin_password
+#
+# Triggers on changes to infrastructure/terraform/** on main only.
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - infrastructure/terraform/**
+
+pr: none   # infrastructure changes must go through main only
+
+pool:
+  vmImage: $(VM_IMAGE)
+
+parameters:
+  - name: environment
+    displayName: "Target environment"
+    type: string
+    default: dev
+    values: [dev, prod]
+
+  - name: terraformAction
+    displayName: "Terraform action"
+    type: string
+    default: apply
+    values: [plan, apply, destroy]
+
+variables:
+  - group: cowfarm-global
+  - group: cowfarm-${{ parameters.environment }}
+  - group: cowfarm-secrets
+  - name: ENV
+    value: ${{ parameters.environment }}
+
+stages:
+  - stage: Terraform_${{ parameters.environment }}
+    displayName: "Terraform – ${{ parameters.environment }} (${{ parameters.terraformAction }})"
+    jobs:
+      - deployment: TerraformDeploy
+        displayName: "Terraform ${{ parameters.terraformAction }}"
+        environment: "cowfarm-${{ parameters.environment }}"   # approval gate in prod
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - bash: |
+                    set -euo pipefail
+                    curl -fsSL -o terraform.zip "https://releases.hashicorp.com/terraform/$(TERRAFORM_VERSION)/terraform_$(TERRAFORM_VERSION)_linux_amd64.zip"
+                    unzip -o terraform.zip
+                    sudo install terraform /usr/local/bin/terraform
+                    terraform version
+                  displayName: "Install Terraform $(TERRAFORM_VERSION)"
+
+                - task: AzureCLI@2
+                  displayName: "terraform init"
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      # Override any stale ARM_* vars from variable groups; bind Terraform to this service connection.
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      else
+                        export ARM_USE_OIDC="true"
+                        export ARM_OIDC_TOKEN="${idToken:-}"
+                      fi
+                      cd $(TERRAFORM_WORKING_DIR)
+                      rm -rf .terraform
+                      terraform init \
+                        -reconfigure \
+                        -backend-config="resource_group_name=$(TFSTATE_RESOURCE_GROUP)" \
+                        -backend-config="storage_account_name=$(TFSTATE_STORAGE_ACCOUNT)" \
+                        -backend-config="container_name=$(TFSTATE_CONTAINER)" \
+                        -backend-config="key=$(TFSTATE_KEY)" \
+                        -backend-config="use_azuread_auth=true"
+
+                - bash: |
+                    set -euo pipefail
+                    cd $(TERRAFORM_WORKING_DIR)
+                    terraform validate
+                  displayName: "terraform validate"
+
+                - task: AzureCLI@2
+                  displayName: "terraform plan"
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      # Override any stale ARM_* vars from variable groups; bind Terraform to this service connection.
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      else
+                        export ARM_USE_OIDC="true"
+                        export ARM_OIDC_TOKEN="${idToken:-}"
+                      fi
+                      cd $(TERRAFORM_WORKING_DIR)
+
+                      if [ "${{ parameters.terraformAction }}" = "destroy" ]; then
+                        terraform plan -destroy \
+                          -var-file=environments/$(ENV).tfvars \
+                          -var="sql_admin_login=$(TF_VAR_sql_admin_login)" \
+                          -var="sql_admin_password=$(TF_VAR_sql_admin_password)" \
+                          -out=$(Pipeline.Workspace)/tfplan-$(ENV)-destroy
+                      else
+                        terraform plan \
+                          -var-file=environments/$(ENV).tfvars \
+                          -var="sql_admin_login=$(TF_VAR_sql_admin_login)" \
+                          -var="sql_admin_password=$(TF_VAR_sql_admin_password)" \
+                          -out=$(Pipeline.Workspace)/tfplan-$(ENV)
+                      fi
+
+                - task: AzureCLI@2
+                  displayName: "terraform apply"
+                  condition: and(succeeded(), eq('${{ parameters.terraformAction }}', 'apply'))
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      # Override any stale ARM_* vars from variable groups; bind Terraform to this service connection.
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      else
+                        export ARM_USE_OIDC="true"
+                        export ARM_OIDC_TOKEN="${idToken:-}"
+                      fi
+                      cd $(TERRAFORM_WORKING_DIR)
+                      terraform apply -auto-approve $(Pipeline.Workspace)/tfplan-$(ENV)
+
+                - task: AzureCLI@2
+                  displayName: "terraform destroy (from plan)"
+                  condition: and(succeeded(), eq('${{ parameters.terraformAction }}', 'destroy'))
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      # Override any stale ARM_* vars from variable groups; bind Terraform to this service connection.
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      else
+                        export ARM_USE_OIDC="true"
+                        export ARM_OIDC_TOKEN="${idToken:-}"
+                      fi
+                      cd $(TERRAFORM_WORKING_DIR)
+                      terraform apply -auto-approve $(Pipeline.Workspace)/tfplan-$(ENV)-destroy
+
+                # Export Terraform outputs as pipeline variables for cd-app.yml.
+                - task: AzureCLI@2
+                  displayName: "Export Terraform outputs"
+                  name: TfOutputs
+                  condition: and(succeeded(), eq('${{ parameters.terraformAction }}', 'apply'))
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      # Override any stale ARM_* vars from variable groups; bind Terraform to this service connection.
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      else
+                        export ARM_USE_OIDC="true"
+                        export ARM_OIDC_TOKEN="${idToken:-}"
+                      fi
+                      cd $(TERRAFORM_WORKING_DIR)
+
+                      rm -rf .terraform
+                      terraform init \
+                        -reconfigure \
+                        -backend-config="resource_group_name=$(TFSTATE_RESOURCE_GROUP)" \
+                        -backend-config="storage_account_name=$(TFSTATE_STORAGE_ACCOUNT)" \
+                        -backend-config="container_name=$(TFSTATE_CONTAINER)" \
+                        -backend-config="key=$(TFSTATE_KEY)" \
+                        -backend-config="use_azuread_auth=true"
+
+                      tf_out() { terraform output -raw "$1" 2>/dev/null || echo ""; }
+
+                      echo "##vso[task.setvariable variable=TF_OUT_RESOURCE_GROUP_NAME;isOutput=true]$(tf_out resource_group_name)"
+                      echo "##vso[task.setvariable variable=TF_OUT_ACR_LOGIN_SERVER;isOutput=true]$(tf_out acr_login_server)"
+                      echo "##vso[task.setvariable variable=TF_OUT_ACR_NAME;isOutput=true]$(tf_out acr_name)"
+                      echo "##vso[task.setvariable variable=TF_OUT_FUNCTIONS_APP_NAME;isOutput=true]$(tf_out functions_app_name)"
+                      echo "##vso[task.setvariable variable=TF_OUT_FUNCTIONS_HOSTNAME;isOutput=true]$(tf_out functions_hostname)"
+                      echo "##vso[task.setvariable variable=TF_OUT_STATIC_WEB_APP_NAME;isOutput=true]$(tf_out static_web_app_name)"
+                      echo "##vso[task.setvariable variable=TF_OUT_STATIC_WEB_APP_URL;isOutput=true]$(tf_out static_web_app_url)"
+                      echo "##vso[task.setvariable variable=TF_OUT_STATIC_WEB_APP_API_KEY;isOutput=true]$(tf_out static_web_app_api_key)"

@@ -1,0 +1,133 @@
+# azure-pipelines/ci.yml
+# Continuous Integration – builds backend, runs tests, builds frontend,
+# and publishes artefacts for the CD pipelines.
+#
+# Triggers on every push to main and on PRs targeting main.
+#
+# Variable groups:
+#   cowfarm-global
+#     VM_IMAGE, DOTNET_VERSION, NODE_VERSION, BUILD_CONFIGURATION
+#     BACKEND_PROJECTS_GLOB, TEST_PROJECTS_GLOB
+#     FRONTEND_WORKING_DIR, BACKEND_DOCKERFILE, BACKEND_BUILD_CONTEXT
+#     DOCKER_IMAGE_NAME
+
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+  paths:
+    exclude:
+      - infrastructure/**
+      - "*.md"
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: $(VM_IMAGE)
+
+variables:
+  - group: cowfarm-global
+
+stages:
+  # ─── Backend ────────────────────────────────────────────────────────────────
+  - stage: Backend_CI
+    displayName: "Backend – Build & Test"
+    jobs:
+      - job: BuildTest
+        displayName: ".NET build + unit tests"
+        steps:
+          - task: UseDotNet@2
+            displayName: "Install .NET $(DOTNET_VERSION)"
+            inputs:
+              version: $(DOTNET_VERSION)
+              packageType: sdk
+
+          - task: DotNetCoreCLI@2
+            displayName: "dotnet restore"
+            inputs:
+              command: restore
+              projects: $(BACKEND_PROJECTS_GLOB)
+
+          - task: DotNetCoreCLI@2
+            displayName: "dotnet build"
+            inputs:
+              command: build
+              projects: $(BACKEND_PROJECTS_GLOB)
+              arguments: "--configuration $(BUILD_CONFIGURATION) --no-restore"
+
+          - task: DotNetCoreCLI@2
+            displayName: "dotnet test"
+            inputs:
+              command: test
+              projects: $(TEST_PROJECTS_GLOB)
+              arguments: >
+                --configuration $(BUILD_CONFIGURATION)
+                --no-build
+                --logger trx
+                --collect:"XPlat Code Coverage"
+            continueOnError: false
+
+          - task: PublishTestResults@2
+            displayName: "Publish test results"
+            inputs:
+              testResultsFormat: VSTest
+              testResultsFiles: "**/*.trx"
+              mergeTestResults: true
+
+          - task: PublishCodeCoverageResults@2
+            displayName: "Publish code coverage"
+            inputs:
+              summaryFileLocation: "**/coverage.cobertura.xml"
+
+  # ─── Frontend ────────────────────────────────────────────────────────────────
+  - stage: Frontend_CI
+    displayName: "Frontend – Build"
+    dependsOn: []          # run in parallel with Backend_CI
+    jobs:
+      - job: BuildFrontend
+        displayName: "Node.js build"
+        steps:
+          - task: NodeTool@0
+            displayName: "Install Node $(NODE_VERSION)"
+            inputs:
+              versionSpec: $(NODE_VERSION)
+
+          - script: npm ci
+            displayName: "npm ci"
+            workingDirectory: $(FRONTEND_WORKING_DIR)
+
+          - script: npm run build
+            displayName: "npm run build"
+            workingDirectory: $(FRONTEND_WORKING_DIR)
+            env:
+              NODE_ENV: production
+              # Placeholder – real URL is injected during CD.
+              VITE_API_BASE_URL: "https://placeholder.azurewebsites.net/api"
+
+          - task: PublishPipelineArtifact@1
+            displayName: "Publish frontend dist artefact"
+            inputs:
+              targetPath: $(FRONTEND_WORKING_DIR)/dist
+              artifact: frontend-dist
+
+  # ─── Docker build (no push – just validate the image builds) ────────────────
+  - stage: Docker_Validate
+    displayName: "Docker – Validate build"
+    dependsOn: Backend_CI
+    condition: succeeded()
+    jobs:
+      - job: DockerBuild
+        displayName: "Build Functions Docker image"
+        steps:
+          - task: Docker@2
+            displayName: "docker build (validate only)"
+            inputs:
+              command: build
+              Dockerfile: $(BACKEND_DOCKERFILE)
+              buildContext: $(BACKEND_BUILD_CONTEXT)
+              tags: "$(DOCKER_IMAGE_NAME):$(Build.BuildId)"
+              arguments: "--platform linux/amd64"

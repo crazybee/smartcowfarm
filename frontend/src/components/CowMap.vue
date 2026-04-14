@@ -5,6 +5,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import L from 'leaflet'
+import { getCowId } from '../services/modelTransforms'
 
 // Fix Leaflet default icon paths
 delete L.Icon.Default.prototype._getIconUrl
@@ -46,23 +47,26 @@ function updateMarkers() {
     const [lat, lng] = Array.isArray(cow.location)
       ? cow.location
       : [cow.location.lat, cow.location.lng]
-    if (!lat || !lng) return
-    seen.add(cow.id)
-    const isAlert = (cow.body_temp || 0) > 39.5
-    const color = isAlert ? '#ef4444' : '#22c55e'
-    if (markers[cow.id]) {
-      markers[cow.id].setLatLng([lat, lng])
-      markers[cow.id].setStyle({ color, fillColor: color })
+    if (lat == null || lng == null) return
+    const cowId = getCowId(cow)
+    if (!cowId) return
+    seen.add(cowId)
+    const isTempHigh = (cow.body_temp || 0) > 39.5
+    const isTempLow = cow.body_temp != null && cow.body_temp < 38.0
+    const color = isTempHigh ? '#ef4444' : isTempLow ? '#3b82f6' : '#22c55e'
+    if (markers[cowId]) {
+      markers[cowId].setLatLng([lat, lng])
+      markers[cowId].setStyle({ color, fillColor: color })
     } else {
       const m = L.circleMarker([lat, lng], {
         radius: 10, color, fillColor: color, fillOpacity: 0.8,
       }).addTo(map)
       m.bindPopup(`
-        <b>Cow ${cow.id}</b><br/>
+        <b>Cow ${cowId}</b><br/>
         Temp: ${cow.body_temp ?? 'N/A'}°C<br/>
         Last milking: ${cow.last_milking ? new Date(cow.last_milking).toLocaleString() : 'N/A'}
       `)
-      markers[cow.id] = m
+      markers[cowId] = m
     }
   })
   Object.keys(markers).forEach(id => {

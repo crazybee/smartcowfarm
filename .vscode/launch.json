@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    
+    {
+      "name": "Attach to Running Functions (Docker)",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "${command:pickRemoteProcess}",
+      "pipeTransport": {
+        "pipeProgram": "docker",
+        "pipeArgs": ["exec", "-i", "smartcowfarm-functions"],
+        "debuggerPath": "/vsdbg/vsdbg",
+        "pipeCwd": "${workspaceFolder}"
+      },
+      "sourceFileMap": {
+        "/src": "${workspaceFolder}/backend/SmartCowFarm.Functions"
+      },
+      "justMyCode": false
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack (Docker)",
+      "configurations": ["Attach to Running Functions (Docker)"],
+      "preLaunchTask": "docker: up debug stack",
+      "presentation": {
+        "hidden": false,
+        "group": "",
+        "order": 1
+      }
+    }
+  ]
+}

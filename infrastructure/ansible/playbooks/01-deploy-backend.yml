@@ -1,0 +1,32 @@
+---
+# 01-deploy-backend.yml
+# Builds the Functions Docker image, pushes it to ACR, and updates the
+# Azure Functions app to run the new container.
+#
+# Required environment variables (set by the CD pipeline from Terraform outputs):
+#   AZURE_SUBSCRIPTION_ID, TF_OUT_RESOURCE_GROUP_NAME,
+#   TF_OUT_ACR_LOGIN_SERVER, TF_OUT_FUNCTIONS_APP_NAME
+#
+# Required extra-vars (passed with -e):
+#   image_tag       – build identifier, e.g. "$(Build.BuildId)"
+#   acr_admin_username, acr_admin_password  – ACR admin credentials
+
+- name: Build and deploy backend container
+  hosts: localhost
+  gather_facts: false
+
+  pre_tasks:
+    - name: Assert required variables are set
+      ansible.builtin.assert:
+        that:
+          - acr_login_server is defined and acr_login_server != ""
+          - acr_admin_username is defined
+          - acr_admin_password is defined
+          - functions_app_name is defined and functions_app_name != ""
+          - azure_resource_group is defined and azure_resource_group != ""
+        fail_msg: >
+          Missing required variables. Ensure Terraform outputs are exported as
+          environment variables and ACR credentials are available.
+
+  roles:
+    - role: deploy_functions

@@ -29,8 +29,11 @@
       </div>
     </div>
     <div class="health-cards-section">
-      <h2>🐄 Cow Health</h2>
-      <div class="health-cards-scroll">
+      <div class="section-header">
+        <h2>🐄 Cow Health</h2>
+        <RouterLink v-if="hasOverflow" to="/cows" class="show-all-link">Show All →</RouterLink>
+      </div>
+      <div class="health-cards-scroll" ref="scrollContainer">
         <HealthCard v-for="cow in store.cows" :key="cow.id" :cow="cow" />
         <div v-if="store.cows.length === 0" class="no-data">No cows found. Add some cows to get started.</div>
       </div>
@@ -57,7 +60,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useCowStore } from '../stores/cowStore'
 import AlertBanner from '../components/AlertBanner.vue'
 import CowMap from '../components/CowMap.vue'
@@ -65,10 +69,24 @@ import HealthCard from '../components/HealthCard.vue'
 import VaxTable from '../components/VaxTable.vue'
 import signalrService from '../services/signalrService'
 import apiService from '../services/apiService'
+import { getCowId } from '../services/modelTransforms'
 
+const router = useRouter()
 const store = useCowStore()
 const vaccinations = ref([])
 const showVaxModal = ref(false)
+const scrollContainer = ref(null)
+const hasOverflow = ref(false)
+
+function checkOverflow() {
+  nextTick(() => {
+    if (scrollContainer.value) {
+      hasOverflow.value = scrollContainer.value.scrollWidth > scrollContainer.value.clientWidth
+    }
+  })
+}
+
+watch(() => store.cows, () => checkOverflow(), { deep: false })
 const vaxForm = ref({ cow_id: '', vaccine_name: '', last_administered: '', next_due: '' })
 
 const geofence = ref([])
@@ -84,7 +102,7 @@ async function loadData() {
 async function loadVaccinations() {
   try {
     const allVax = await Promise.all(
-      store.cows.map(c => apiService.getVaccinations(c.id).catch(() => []))
+      store.cows.map(c => apiService.getVaccinations(getCowId(c)).catch(() => []))
     )
     vaccinations.value = allVax.flat()
   } catch (e) {
@@ -106,6 +124,10 @@ async function submitVax() {
 onMounted(async () => {
   await loadData()
   await loadVaccinations()
+  checkOverflow()
+  const ro = new ResizeObserver(checkOverflow)
+  if (scrollContainer.value) ro.observe(scrollContainer.value)
+  onUnmounted(() => ro.disconnect())
   signalrService.onCowUpdate(payload => {
     store.updateCowTelemetry(payload)
     store.isConnected = true
@@ -137,6 +159,10 @@ h2 { margin: 0 0 12px; font-size: 1.1rem; }
 .last-updated, .connection-status { font-size: 0.8rem; color: #6b7280; text-align: center; margin-top: 6px; }
 .connected { color: #16a34a; }
 .health-cards-section { margin-bottom: 20px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-header h2 { margin: 0; }
+.show-all-link { font-size: 0.85rem; color: #3b82f6; text-decoration: none; font-weight: 500; white-space: nowrap; }
+.show-all-link:hover { text-decoration: underline; }
 .health-cards-scroll { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; }
 .no-data { color: #9ca3af; padding: 20px; }
 .vax-section { margin-bottom: 20px; }
