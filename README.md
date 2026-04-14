@@ -2,6 +2,11 @@
 
 SmartCowFarm is an Azure-native livestock monitoring solution that combines IoT telemetry, serverless processing, real-time alerts, and a web dashboard to help farmers track cow health and operations.
 
+<img width="1862" height="897" alt="image" src="https://github.com/user-attachments/assets/34b1b72b-ae1c-496b-b15a-79c5b689b66b" />
+
+<img width="1909" height="545" alt="image" src="https://github.com/user-attachments/assets/5be7bbd7-1223-4236-8124-e85b48b23297" />
+<img width="1887" height="471" alt="image" src="https://github.com/user-attachments/assets/2146c3c4-5ca8-48a7-aeab-01e3e659db8e" />
+
 ---
 
 ## Architecture
